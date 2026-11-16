@@ -1,0 +1,101 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare project from zip
+        run: |
+          set -ex
+          ls -la
+          # Clean conflicting dirs/files from previous partial pushes
+          rm -rf app gradle .github/workflows/build.yml build.gradle.kts settings.gradle.kts gradle.properties gradlew database.rules.json README.md .gitignore TRIGGER_BUILD.txt 2>/dev/null || true
+          if [ ! -f mediaplatform.zip ]; then
+            echo "mediaplatform.zip missing"
+            exit 1
+          fi
+          unzip -o mediaplatform.zip
+          if [ -d mediaplatform ]; then
+            shopt -s dotglob
+            for f in mediaplatform/*; do
+              base=$(basename "$f")
+              rm -rf "./$base" 2>/dev/null || true
+              mv "$f" .
+            done
+            rmdir mediaplatform || true
+          fi
+          ls -la
+          test -f gradlew
+          test -f settings.gradle.kts
+          test -d app
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: google-services.json
+        env:
+          GS: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          mkdir -p app
+          if [ -n "$GS" ]; then
+            echo "$GS" | base64 -d > app/google-services.json
+            echo "From secret OK"
+          else
+            echo "Using embedded google-services (secret not set)"
+            cat > app/google-services.json << 'EJSON'
+{
+  "project_info": {
+    "project_number": "854693277536",
+    "firebase_url": "https://app-midia-7043a-default-rtdb.firebaseio.com",
+    "project_id": "app-midia-7043a",
+    "storage_bucket": "app-midia-7043a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854693277536:android:3bf351cdcefa81d0e6b805",
+        "android_client_info": {
+          "package_name": "com.gugugaga.mediaplatform"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyARkI7khi9YmehCOvZuxssnhnOWU9aipRw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+EJSON
+          fi
+          cat app/google-services.json | head -5
+
+      - name: Build
+        env:
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
