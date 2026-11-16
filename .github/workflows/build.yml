@@ -12,22 +12,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract zip
+      - name: Extract and prepare project
         run: |
-          echo "Files in root:"
+          set -e
+          echo "=== Current root ==="
           ls -la
-          if [ -f mediaplatform.zip ]; then
-            echo "Unzipping mediaplatform.zip..."
-            unzip -o mediaplatform.zip
-            if [ -d mediaplatform ]; then
-              echo "Moving files from mediaplatform/ to root"
-              shopt -s dotglob
-              mv mediaplatform/* .
-              rmdir mediaplatform || true
-            fi
-            echo "After extract:"
-            ls -la
+
+          # Remove conflicting partial project files so zip can fully replace them
+          rm -rf app gradle build.gradle.kts settings.gradle.kts gradle.properties gradlew database.rules.json README.md .gitignore 2>/dev/null || true
+
+          if [ ! -f mediaplatform.zip ]; then
+            echo "ERROR: mediaplatform.zip not found!"
+            exit 1
           fi
+
+          echo "=== Unzipping ==="
+          unzip -o mediaplatform.zip
+
+          if [ -d mediaplatform ]; then
+            echo "=== Moving project files to root ==="
+            # Move everything including hidden files carefully
+            shopt -s dotglob nullglob
+            for item in mediaplatform/*; do
+              name=$(basename "$item")
+              if [ -e "./$name" ]; then
+                rm -rf "./$name"
+              fi
+              mv "$item" .
+            done
+            rmdir mediaplatform 2>/dev/null || true
+          fi
+
+          echo "=== After extract ==="
+          ls -la
+          echo "=== Checking key files ==="
+          ls -la gradlew app/build.gradle.kts settings.gradle.kts || true
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -46,22 +65,54 @@ jobs:
           if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
             echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > app/google-services.json
             echo "google-services.json created from secret"
+            head -c 100 app/google-services.json
+            echo "..."
           else
-            echo "Secret missing - creating dummy"
-            echo '{"project_info":{"project_number":"854693277536","project_id":"app-midia-7043a","storage_bucket":"app-midia-7043a.firebasestorage.app"},"client":[{"client_info":{"mobilesdk_app_id":"1:854693277536:android:3bf351cdcefa81d0e6b805","android_client_info":{"package_name":"com.gugugaga.mediaplatform"}},"api_key":[{"current_key":"AIzaSyARkI7khi9YmehCOvZuxssnhnOWU9aipRw"}]}],"configuration_version":"1"}' > app/google-services.json
+            echo "WARNING: Secret GOOGLE_SERVICES_JSON_BASE64 is missing. Using embedded dummy."
+            cat > app/google-services.json << 'EOF'
+{
+  "project_info": {
+    "project_number": "854693277536",
+    "firebase_url": "https://app-midia-7043a-default-rtdb.firebaseio.com",
+    "project_id": "app-midia-7043a",
+    "storage_bucket": "app-midia-7043a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854693277536:android:3bf351cdcefa81d0e6b805",
+        "android_client_info": {
+          "package_name": "com.gugugaga.mediaplatform"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyARkI7khi9YmehCOvZuxssnhnOWU9aipRw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+EOF
           fi
-          ls -la app/google-services.json
 
-      - name: Build APK
+      - name: Build Debug APK
         env:
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --info 2>&1 | tail -100
+          ./gradlew assembleDebug --stacktrace
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
+          if-no-files-found: error
