@@ -11,30 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare project from zip
+      - name: Unzip project
         run: |
           set -ex
           ls -la
-          # Clean conflicting dirs/files from previous partial pushes
-          rm -rf app gradle .github/workflows/build.yml build.gradle.kts settings.gradle.kts gradle.properties gradlew database.rules.json README.md .gitignore TRIGGER_BUILD.txt 2>/dev/null || true
-          if [ ! -f mediaplatform.zip ]; then
-            echo "mediaplatform.zip missing"
-            exit 1
-          fi
           unzip -o mediaplatform.zip
-          if [ -d mediaplatform ]; then
-            shopt -s dotglob
-            for f in mediaplatform/*; do
-              base=$(basename "$f")
-              rm -rf "./$base" 2>/dev/null || true
-              mv "$f" .
-            done
-            rmdir mediaplatform || true
-          fi
-          ls -la
-          test -f gradlew
-          test -f settings.gradle.kts
-          test -d app
+          ls -la mediaplatform/
+          test -f mediaplatform/gradlew
 
       - uses: actions/setup-java@v4
         with:
@@ -47,13 +30,13 @@ jobs:
         env:
           GS: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
-          mkdir -p app
+          mkdir -p mediaplatform/app
           if [ -n "$GS" ]; then
-            echo "$GS" | base64 -d > app/google-services.json
+            echo "$GS" | base64 -d > mediaplatform/app/google-services.json
             echo "From secret OK"
           else
-            echo "Using embedded google-services (secret not set)"
-            cat > app/google-services.json << 'EJSON'
+            echo "Using embedded"
+            cat > mediaplatform/app/google-services.json << 'EJSON'
 {
   "project_info": {
     "project_number": "854693277536",
@@ -86,11 +69,11 @@ jobs:
 }
 EJSON
           fi
-          cat app/google-services.json | head -5
 
-      - name: Build
+      - name: Build APK
         env:
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+        working-directory: mediaplatform
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
@@ -98,4 +81,4 @@ EJSON
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: mediaplatform/app/build/outputs/apk/debug/*.apk
