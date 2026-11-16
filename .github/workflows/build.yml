@@ -1,118 +1,92 @@
 name: Build Debug APK
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Prepare from zip if needed
+      - name: Unzip if needed
         run: |
-          if [ ! -f gradlew ] && [ -f mediaplatform.zip ]; then
-            echo "Source not present, extracting zip..."
-            unzip -o mediaplatform.zip
-            if [ -d mediaplatform ]; then
-              shopt -s dotglob
-              for f in mediaplatform/*; do
-                base=$(basename "$f")
-                if [ -e "./$base" ] && [ "$base" != ".github" ]; then
-                  rm -rf "./$base"
-                fi
-                if [ "$base" != ".github" ]; then
-                  mv "$f" . || true
-                fi
-              done
-              # copy source from mediaplatform if still there
-              if [ -d mediaplatform/app ]; then
-                cp -r mediaplatform/app .
-                cp -r mediaplatform/gradle . 2>/dev/null || true
-                cp mediaplatform/gradlew . 2>/dev/null || true
-                cp mediaplatform/*.gradle.kts . 2>/dev/null || true
-                cp mediaplatform/gradle.properties . 2>/dev/null || true
-              fi
-            fi
-          fi
           ls -la
-          ls -la gradlew app 2>/dev/null || true
+          if [ -f mediaplatform.zip ]; then
+            unzip -o mediaplatform.zip
+            ls -la mediaplatform/ || true
+          fi
 
-      - uses: actions/setup-java@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          distribution: 'temurin'
+          java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: google-services.json
-        env:
-          GS: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+      - name: Write google-services.json
         run: |
           mkdir -p app
-          if [ -n "$GS" ]; then
-            echo "$GS" | base64 -d > app/google-services.json
-            echo "Secret used"
-          else
-            echo "Embedded google-services used"
-            cat > app/google-services.json << 'EOF'
-{
-  "project_info": {
-    "project_number": "854693277536",
-    "firebase_url": "https://app-midia-7043a-default-rtdb.firebaseio.com",
-    "project_id": "app-midia-7043a",
-    "storage_bucket": "app-midia-7043a.firebasestorage.app"
-  },
-  "client": [
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:854693277536:android:3bf351cdcefa81d0e6b805",
-        "android_client_info": {
-          "package_name": "com.gugugaga.mediaplatform"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyARkI7khi9YmehCOvZuxssnhnOWU9aipRw"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    }
-  ],
-  "configuration_version": "1"
-}
-EOF
-          fi
+          mkdir -p mediaplatform/app
+          cat > app/google-services.json << 'ENDJSON'
+          {
+            "project_info": {
+              "project_number": "854693277536",
+              "firebase_url": "https://app-midia-7043a-default-rtdb.firebaseio.com",
+              "project_id": "app-midia-7043a",
+              "storage_bucket": "app-midia-7043a.firebasestorage.app"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:854693277536:android:3bf351cdcefa81d0e6b805",
+                  "android_client_info": {
+                    "package_name": "com.gugugaga.mediaplatform"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyARkI7khi9YmehCOvZuxssnhnOWU9aipRw"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          ENDJSON
+          cp app/google-services.json mediaplatform/app/google-services.json 2>/dev/null || true
+          echo "google-services.json ready"
 
-      - name: Build
-        env:
-          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+      - name: Build APK
         run: |
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug --stacktrace
-          elif [ -f mediaplatform/gradlew ]; then
+          if [ -f mediaplatform/gradlew ]; then
             cd mediaplatform
             chmod +x gradlew
             ./gradlew assembleDebug --stacktrace
+          elif [ -f gradlew ]; then
+            chmod +x gradlew
+            ./gradlew assembleDebug --stacktrace
           else
-            echo "No gradlew found"
-            find . -name gradlew
+            echo "gradlew not found"
+            find . -name "gradlew" -o -name "*.gradle.kts" | head -20
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
           path: |
-            app/build/outputs/apk/debug/*.apk
-            mediaplatform/app/build/outputs/apk/debug/*.apk
+            **/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
