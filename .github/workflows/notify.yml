@@ -1,0 +1,34 @@
+name: Send notification (FCM)
+
+# FCM server credentials never live inside the app. Add repo secret FIREBASE_SERVICE_ACCOUNT
+# (service-account JSON with "Firebase Cloud Messaging Admin" role), then run this workflow
+# manually or via API to send topic messages.
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "FCM topic (all / news)"
+        required: true
+        default: "all"
+      title:
+        description: "Notification title"
+        required: true
+      body:
+        description: "Notification body"
+        required: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send FCM
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          TOPIC: ${{ github.event.inputs.topic }}
+          TITLE: ${{ github.event.inputs.title }}
+          BODY: ${{ github.event.inputs.body }}
+        run: |
+          echo "$SA" > sa.json
+          # Use Firebase Admin or REST API here. Placeholder for now.
+          echo "Would send to topic=$TOPIC title=$TITLE"
