@@ -9,31 +9,65 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Unzip if needed
+      - name: Unzip project
         run: |
+          set -ex
           ls -la
-          if [ -f mediaplatform.zip ]; then
-            unzip -o mediaplatform.zip
-            ls -la mediaplatform/ || true
-          fi
+          unzip -o mediaplatform.zip
+          ls mediaplatform/
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Write google-services.json
+      - name: Fix BrowserScreen.kt (remove duplicated broken code)
         run: |
-          mkdir -p app
+          # The zip has a corrupted BrowserScreen with duplicated blocks and extra braces.
+          # We rewrite the corrupted middle section by keeping good head + good dialogs tail.
+          FILE=mediaplatform/app/src/main/java/com/gugugaga/mediaplatform/ui/browser/BrowserScreen.kt
+          python3 << 'PY'
+from pathlib import Path
+p = Path("mediaplatform/app/src/main/java/com/gugugaga/mediaplatform/ui/browser/BrowserScreen.kt")
+lines = p.read_text().splitlines()
+# Find first occurrence of the broken pattern after line 100
+cut = None
+for i, line in enumerate(lines):
+    if i > 100 and line.strip().startswith("manager.pendingGeo?.let { g -> g.callback.invoke"):
+        cut = i
+        break
+if cut is None:
+    print("No corruption found, leaving as-is")
+else:
+    # find the next good "manager.pendingGeo?.let { g ->" with AlertDialog after cut
+    resume = None
+    for i, line in enumerate(lines):
+        if i > cut and line.strip() == "manager.pendingGeo?.let { g ->" and i+1 < len(lines) and "AlertDialog" in lines[i+1]:
+            resume = i
+            break
+    if resume is None:
+        # fallback: find kindsOf helper
+        for i, line in enumerate(lines):
+            if i > cut and line.strip().startswith("private fun kindsOf"):
+                resume = i
+                break
+    if resume is None:
+        raise SystemExit("Could not find resume point")
+    new_lines = lines[:cut] + lines[resume:]
+    p.write_text("\n".join(new_lines) + "\n")
+    print(f"Fixed: kept 1..{cut}, skipped to {resume}, total {len(new_lines)} lines")
+    t = p.read_text()
+    print(f"brace balance: {t.count(chr(123)) - t.count(chr(125))}")
+PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: google-services.json
+        run: |
           mkdir -p mediaplatform/app
-          cat > app/google-services.json << 'ENDJSON'
+          cat > mediaplatform/app/google-services.json << 'ENDJSON'
 {
   "project_info": {
     "project_number": "854693277536",
@@ -65,29 +99,17 @@ jobs:
   "configuration_version": "1"
 }
 ENDJSON
-          cp app/google-services.json mediaplatform/app/google-services.json 2>/dev/null || true
-          echo "google-services.json ready"
-          cat app/google-services.json | head -3
 
       - name: Build APK
+        working-directory: mediaplatform
+        env:
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
         run: |
-          if [ -f mediaplatform/gradlew ]; then
-            cd mediaplatform
-            chmod +x gradlew
-            ./gradlew assembleDebug --stacktrace
-          elif [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug --stacktrace
-          else
-            echo "gradlew not found"
-            find . -name "gradlew" -o -name "*.gradle.kts" | head -20
-            exit 1
-          fi
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: |
-            **/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
+          path: mediaplatform/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
