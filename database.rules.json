@@ -1,0 +1,28 @@
+{
+  "rules": {
+    ".read": true,
+    "websites": {
+      ".write": "auth != null && auth.uid == 'ASLI_ADMIN_UID'",
+      "$siteId": {
+        "clickCount": {
+          ".write": "!data.exists() || data.val() == null || newData.val() == data.val() + 1"
+        },
+        "likes": {
+          ".write": "!data.exists() || data.val() == null || newData.val() == data.val() + 1"
+        },
+        "dislikes": {
+          ".write": "!data.exists() || data.val() == null || newData.val() == data.val() + 1"
+        }
+      }
+    },
+    "config": {
+      ".write": "auth != null && auth.uid == 'ASLI_ADMIN_UID'"
+    },
+    "adblock": {
+      ".write": "auth != null && auth.uid == 'ASLI_ADMIN_UID'"
+    },
+    "reports": {
+      ".write": "auth != null"
+    }
+  }
+}
