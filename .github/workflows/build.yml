@@ -1,61 +1,16 @@
 name: Build Debug APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Unzip project
-        run: |
-          set -ex
-          ls -la
-          unzip -o mediaplatform.zip
-          ls mediaplatform/
-
-      - name: Fix BrowserScreen.kt (remove duplicated broken code)
-        run: |
-          # The zip has a corrupted BrowserScreen with duplicated blocks and extra braces.
-          # We rewrite the corrupted middle section by keeping good head + good dialogs tail.
-          FILE=mediaplatform/app/src/main/java/com/gugugaga/mediaplatform/ui/browser/BrowserScreen.kt
-          python3 << 'PY'
-from pathlib import Path
-p = Path("mediaplatform/app/src/main/java/com/gugugaga/mediaplatform/ui/browser/BrowserScreen.kt")
-lines = p.read_text().splitlines()
-# Find first occurrence of the broken pattern after line 100
-cut = None
-for i, line in enumerate(lines):
-    if i > 100 and line.strip().startswith("manager.pendingGeo?.let { g -> g.callback.invoke"):
-        cut = i
-        break
-if cut is None:
-    print("No corruption found, leaving as-is")
-else:
-    # find the next good "manager.pendingGeo?.let { g ->" with AlertDialog after cut
-    resume = None
-    for i, line in enumerate(lines):
-        if i > cut and line.strip() == "manager.pendingGeo?.let { g ->" and i+1 < len(lines) and "AlertDialog" in lines[i+1]:
-            resume = i
-            break
-    if resume is None:
-        # fallback: find kindsOf helper
-        for i, line in enumerate(lines):
-            if i > cut and line.strip().startswith("private fun kindsOf"):
-                resume = i
-                break
-    if resume is None:
-        raise SystemExit("Could not find resume point")
-    new_lines = lines[:cut] + lines[resume:]
-    p.write_text("\n".join(new_lines) + "\n")
-    print(f"Fixed: kept 1..{cut}, skipped to {resume}, total {len(new_lines)} lines")
-    t = p.read_text()
-    print(f"brace balance: {t.count(chr(123)) - t.count(chr(125))}")
-PY
 
       - uses: actions/setup-java@v4
         with:
@@ -64,46 +19,29 @@ PY
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: google-services.json
+      - name: Decode google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
-          mkdir -p mediaplatform/app
-          cat > mediaplatform/app/google-services.json << 'ENDJSON'
-{
-  "project_info": {
-    "project_number": "854693277536",
-    "firebase_url": "https://app-midia-7043a-default-rtdb.firebaseio.com",
-    "project_id": "app-midia-7043a",
-    "storage_bucket": "app-midia-7043a.firebasestorage.app"
-  },
-  "client": [
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:854693277536:android:3bf351cdcefa81d0e6b805",
-        "android_client_info": {
-          "package_name": "com.gugugaga.mediaplatform"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyARkI7khi9YmehCOvZuxssnhnOWU9aipRw"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    }
-  ],
-  "configuration_version": "1"
-}
-ENDJSON
+          test -n "$GOOGLE_SERVICES_JSON_BASE64" || { echo "Secret GOOGLE_SERVICES_JSON_BASE64 missing"; exit 1; }
+          echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > app/google-services.json
 
-      - name: Build APK
-        working-directory: mediaplatform
+      - name: Decode fixed debug keystore (optional)
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > app/debug.keystore
+          else
+            echo "No fixed keystore secret; using default debug key (updates may fail signature check)."
+          fi
+
+      - name: Build
         env:
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          DEBUG_KEYSTORE_PASSWORD: ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
+          DEBUG_KEY_ALIAS: ${{ secrets.DEBUG_KEY_ALIAS }}
+          DEBUG_KEY_PASSWORD: ${{ secrets.DEBUG_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
@@ -111,5 +49,4 @@ ENDJSON
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: mediaplatform/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          path: app/build/outputs/apk/debug/*.apk
