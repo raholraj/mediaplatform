@@ -1,34 +1,41 @@
 name: Send notification (FCM)
 
-# FCM server credentials never live inside the app. Add repo secret FIREBASE_SERVICE_ACCOUNT
-# (service-account JSON with "Firebase Cloud Messaging Admin" role), then run this workflow
-# manually or via API to send topic messages.
-
 on:
   workflow_dispatch:
     inputs:
       topic:
-        description: "FCM topic (all / news)"
+        description: 'Topic (all or news)'
         required: true
-        default: "all"
+        default: 'all'
       title:
-        description: "Notification title"
+        description: 'Notification title'
         required: true
       body:
-        description: "Notification body"
+        description: 'Notification body'
         required: true
 
 jobs:
-  send:
+  notify:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Send FCM
         env:
-          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           TOPIC: ${{ github.event.inputs.topic }}
           TITLE: ${{ github.event.inputs.title }}
           BODY: ${{ github.event.inputs.body }}
         run: |
-          echo "$SA" > sa.json
-          # Use Firebase Admin or REST API here. Placeholder for now.
-          echo "Would send to topic=$TOPIC title=$TITLE"
+          echo "$FIREBASE_SERVICE_ACCOUNT" > sa.json
+          # Use curl or a simple python script to send to FCM
+          python3 -c "
+import json, requests
+from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+creds = service_account.Credentials.from_service_account_file('sa.json', scopes=['https://www.googleapis.com/auth/firebase.messaging'])
+creds.refresh(Request())
+token = creds.token
+payload = {'message': {'topic': '$TOPIC', 'notification': {'title': '$TITLE', 'body': '$BODY'}}}
+r = requests.post('https://fcm.googleapis.com/v1/projects/' + json.load(open('sa.json'))['project_id'] + '/messages:send', headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, json=payload)
+print(r.status_code, r.text)
+"
